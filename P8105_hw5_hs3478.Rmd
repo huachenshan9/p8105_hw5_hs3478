@@ -1,0 +1,215 @@
+---
+title: "P8105 hw5"
+author: "Charles"
+date: "2024-11-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(broom)
+set.seed(123)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+Problem 1
+Function for Shared Birthday
+
+```{r cars}
+shared_birthday <- function(n) {
+  birthdays <- sample(1:365, n, replace = TRUE)
+  return(any(duplicated(birthdays)))
+}
+```
+
+Parameters and Simulations for each Group Size
+
+```{r pressure, echo=FALSE}
+num_simulations <- 10000
+group_sizes <- 2:50
+probabilities <- numeric(length(group_sizes))
+
+for (i in seq_along(group_sizes)) {
+  n <- group_sizes[i]
+  results <- replicate(num_simulations, shared_birthday(n))
+  probabilities[i] <- mean(results)
+}
+```
+
+Creating a Data Frame and Plotting
+```{r}
+birthday_df <- data.frame(GroupSize = group_sizes, Probability = probabilities)
+
+# Plot
+ggplot(birthday_df, aes(x = GroupSize, y = Probability)) +
+  geom_line(color = "black") +
+  geom_point(color = "yellow") +
+  labs(
+    title = "Probability of Shared Birthday by Group Size",
+    x = "Group Size",
+    y = "Probability of Shared Birthday"
+  ) +
+  theme_minimal()
+```
+The likelihood of at least two people sharing a birthday increases as the group grows larger. For smaller groups, the probability is very low because the chances of a match are slim. However, as the group size approaches 50, the probability climbs significantly, nearing certainty. This indicates that it becomes almost guaranteed for at least one pair to have the same birthday.
+
+Problem 2
+Setting Initial Parameters
+```{r}
+library(broom)
+
+sample_size <- 30
+standard_dev <- 5
+true_mean_0 <- 0
+num_reps <- 5000
+significance_level <- 0.05
+```
+
+Generating Data and Results
+```{r}
+simulate_t_test <- function(mu) {
+  data <- rnorm(n, mean = mu, sd = sigma)
+  t_test_result <- t.test(data, mu = 0)
+  result <- tidy(t_test_result)
+  return(c(mean_estimate = mean(data), p_value = result$p.value))
+}
+```
+Run simulations
+```{r}
+simulation_results <- data.frame()
+for (mu in mu_values) {
+  sim_data <- replicate(num_simulations, simulate_t_test(mu), simplify = FALSE)
+  sim_data <- do.call(rbind, sim_data)
+  sim_data <- as.data.frame(sim_data)
+  sim_data$mu <- mu
+  sim_data$rejected <- sim_data$p_value < alpha
+  simulation_results <- rbind(simulation_results, sim_data)
+}
+
+```
+
+Calculate power (proportion of rejections) for each mu
+```{r}
+power_data <- simulation_results %>%
+  group_by(mu) %>%
+  summarize(power = mean(rejected))
+```
+
+Calculate average estimate of mu and conditional average (rejected only)
+```{r}
+estimate_data <- simulation_results %>%
+  group_by(mu) %>%
+  summarize(avg_estimate = mean(mean_estimate),
+            avg_estimate_rejected = mean(mean_estimate[rejected]))
+```
+
+Plotting power vs. mu
+```{r}
+ggplot(power_data, aes(x = mu, y = power)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Power of One-Sample t-Test vs. True Mu",
+       x = "True Value of Mu",
+       y = "Power (Proportion of Null Rejections)") +
+  theme_minimal()
+```
+
+The plot shows that as effect size (true mean) increases, the power of the test also increases, indicating a higher likelihood of correctly rejecting the null hypothesis. For larger effect sizes, the power approaches 1, meaning the test almost always detects the effect.
+
+Plotting Average Estimates of mean_estimates
+```{r}
+ggplot(estimate_data, aes(x = mu)) +
+  geom_line(aes(y = avg_estimate), color = "blue", linetype = "solid") +
+  geom_line(aes(y = avg_estimate_rejected), color = "red", linetype = "dashed") +
+  geom_point(aes(y = avg_estimate), color = "blue") +
+  geom_point(aes(y = avg_estimate_rejected), color = "red") +
+  labs(title = "Average Estimate of Mu vs. True Mu",
+       x = "True Value of Mu",
+       y = "Average Estimate of Mu") +
+  theme_minimal() +
+  scale_color_manual(values = c("blue", "red"),
+                     labels = c("All samples", "Only rejected samples")) +
+  guides(color = guide_legend(title = "Sample Type"))
+```
+
+Problem 3
+
+```{r}
+homicide_data <- read.csv("C:\Users\Shan Huachen\Desktop\MPH Core\Data Science\homicide-data.csv")
+```
+
+
+The dataset contains 52,179 records of homicide cases, each with details about the victim’s demographics (name, race, age, and sex) and incident specifics, including date, location (city, state, latitude, and longitude), and case status (disposition). The disposition column indicates whether the case was resolved, often noting if it was closed by arrest. Some entries lack latitude and longitude values.
+```{r}
+homicide_summary <- homicide_data %>%
+  mutate(city_state = paste(city, state, sep = ", ")) %>%
+  group_by(city_state) %>%
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))
+  ) %>%
+  ungroup()
+
+homicide_summary %>% 
+  head(10) %>% 
+  knitr::kable()
+```
+
+```{r}
+# Filter data for Baltimore, MD
+baltimore_data <- filter(homicide_summary, city_state == "Baltimore, MD")
+
+# Use prop.test and tidy the output
+baltimore_test <- prop.test(baltimore_data$unsolved_homicides, baltimore_data$total_homicides)
+baltimore_tidy <- broom::tidy(baltimore_test)
+
+# Extract proportion estimate and confidence intervals for Baltimore
+baltimore_proportion <- baltimore_tidy$estimate
+baltimore_conf_int <- c(baltimore_tidy$conf.low, baltimore_tidy$conf.high)
+baltimore_proportion
+```
+
+Filtering for all the Cities
+```{r}
+# Apply prop.test for each city and extract proportions and CIs
+homicide_proportions <- homicide_summary %>%
+  mutate(
+    test_results = map2(unsolved_homicides, total_homicides, ~ broom::tidy(prop.test(.x, .y))),
+    proportion = map_dbl(test_results, "estimate"),
+    conf_low = map_dbl(test_results, "conf.low"),
+    conf_high = map_dbl(test_results, "conf.high")
+  ) %>%
+  select(city_state, proportion, conf_low, conf_high)
+```
+
+```{r}
+# Reorder cities based on proportion of unsolved homicides
+homicide_proportions <- homicide_proportions %>%
+  arrange(desc(proportion)) %>%
+  mutate(city_state = factor(city_state, levels = city_state))
+```
+
+Plotting
+```{r}
+# Plot the proportions with confidence intervals
+ggplot(homicide_proportions, aes(x = city_state, y = proportion)) +
+  geom_point(color = "red") +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_high), width = 0.5) +
+  coord_flip() +
+  labs(
+    title = "Proportion of Unsolved Homicides by City",
+    x = "City",
+    y = "Proportion of Unsolved Homicides (with 95% CI)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 5, hjust = 1, vjust = 0.5), # Adjust text size and spacing
+  ) 
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
